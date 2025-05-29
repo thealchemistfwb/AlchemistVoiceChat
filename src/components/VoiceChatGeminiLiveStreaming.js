@@ -369,7 +369,6 @@ ${accessToken ? 'The user has already connected their bank account, so you can h
       setIsConnected(false);
       setIsStreaming(false);
       setIsSpeaking(false);
-      setCurrentTranscript('');
       
       console.log('✅ Session stopped');
       
