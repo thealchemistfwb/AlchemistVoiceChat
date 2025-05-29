@@ -41,7 +41,7 @@ const ChatBot = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/chat', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -105,7 +105,7 @@ const ChatBot = () => {
 
   const fetchAccountBalances = async (token) => {
     try {
-      const response = await fetch('http://localhost:3001/api/plaid/financial-summary', {
+      const response = await fetch('/api/plaid/financial-summary', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -6,7 +6,6 @@ const VoiceChatGeminiLiveStreaming = ({ accessToken, onMessageUpdate }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [currentTranscript, setCurrentTranscript] = useState('');
   const [aiResponse, setAiResponse] = useState('');
   const [backendStatus, setBackendStatus] = useState(null);
   const [availableVoices, setAvailableVoices] = useState({});
@@ -17,8 +16,6 @@ const VoiceChatGeminiLiveStreaming = ({ accessToken, onMessageUpdate }) => {
   const audioContextRef = useRef(null);
   const workletRef = useRef(null);
   const currentAudioRef = useRef(null);
-  const wsRef = useRef(null);
-  const audioChunksRef = useRef([]);
   const isStreamingRef = useRef(false);
 
   // Check Gemini Live API status

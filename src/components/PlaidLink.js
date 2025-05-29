@@ -14,7 +14,7 @@ const PlaidLink = ({ onSuccess, onError, isConnected, connectedBank }) => {
         setIsLoading(true);
         setHasError(false);
         
-        const response = await fetch('http://localhost:3001/api/plaid/create-link-token', {
+        const response = await fetch('/api/plaid/create-link-token', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -45,7 +45,7 @@ const PlaidLink = ({ onSuccess, onError, isConnected, connectedBank }) => {
   const onSuccessCallback = useCallback(async (public_token, metadata) => {
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:3001/api/plaid/exchange-public-token', {
+      const response = await fetch('/api/plaid/exchange-public-token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
