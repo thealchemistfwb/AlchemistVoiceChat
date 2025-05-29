@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Finley Voice AI - Pipecat Edition</title>
+    <script src="https://unpkg.com/@daily-co/daily-js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            font-weight: 500;
+        }
+
+        .status.disconnected {
+            background: rgba(231, 76, 60, 0.3);
+            border: 1px solid rgba(231, 76, 60, 0.5);
+        }
+
+        .status.connecting {
+            background: rgba(241, 196, 15, 0.3);
+            border: 1px solid rgba(241, 196, 15, 0.5);
+        }
+
+        .status.connected {
+            background: rgba(46, 204, 113, 0.3);
+            border: 1px solid rgba(46, 204, 113, 0.5);
+        }
+
+        .controls {
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        button {
+            background: linear-gradient(45deg, #3498db, #9b59b6);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            margin: 10px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .mic-button {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            font-size: 48px;
+            margin: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mic-button.listening {
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+            animation: pulse 1.5s infinite;
+        }
+
+        .mic-button.muted {
+            background: linear-gradient(45deg, #7f8c8d, #95a5a6);
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .conversation {
+            max-height: 400px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .user-message {
+            background: rgba(52, 152, 219, 0.3);
+            text-align: right;
+        }
+
+        .bot-message {
+            background: rgba(46, 204, 113, 0.3);
+            text-align: left;
+        }
+
+        .debug-info {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .warning {
+            background: rgba(241, 196, 15, 0.3);
+            border: 1px solid rgba(241, 196, 15, 0.5);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Finley Voice AI</h1>
+        <p style="text-align: center; font-size: 1.2em; margin-bottom: 30px;">
+            Real-time voice conversation powered by Pipecat & Daily.co
+        </p>
+
+        <div id="status" class="status disconnected">
+            🔴 Disconnected - Click "Connect" to start voice chat
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" onclick="connectToVoiceChat()">
+                🚀 Connect Voice Chat
+            </button>
+            <button id="disconnectBtn" onclick="disconnectVoiceChat()" disabled>
+                🔌 Disconnect
+            </button>
+            <br>
+            <button id="micBtn" class="mic-button muted" onclick="toggleMicrophone()" disabled>
+                🎤
+            </button>
+            <br>
+            <small id="micStatus">Microphone: Off</small>
+        </div>
+
+        <div class="conversation" id="conversation">
+            <div class="message bot-message">
+                <strong>Finley:</strong> Hi there! I'm Finley, your voice-powered financial assistant. Connect to start our conversation!
+            </div>
+        </div>
+
+        <div class="warning">
+            <strong>⚠️ Setup Required:</strong>
+            <ul>
+                <li>Make sure the Pipecat server is running on port 7860</li>
+                <li>Allow microphone access when prompted</li>
+                <li>Use Chrome or Firefox for best WebRTC support</li>
+                <li>Ensure DAILY_API_KEY and CARTESIA_API_KEY are configured</li>
+            </ul>
+        </div>
+
+        <div class="debug-info" id="debugInfo">
+            Debug info will appear here...
+        </div>
+    </div>
+
+    <script>
+        let callFrame = null;
+        let isConnected = false;
+        let isMuted = true;
+        let currentBotId = null;
+
+        const statusEl = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const micBtn = document.getElementById('micBtn');
+        const micStatus = document.getElementById('micStatus');
+        const conversationEl = document.getElementById('conversation');
+        const debugEl = document.getElementById('debugInfo');
+
+        function updateStatus(message, type) {
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+            addDebugMessage(`Status: ${message}`);
+        }
+
+        function addDebugMessage(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            debugEl.innerHTML += `[${timestamp}] ${message}<br>`;
+            debugEl.scrollTop = debugEl.scrollHeight;
+        }
+
+        function addConversationMessage(sender, message) {
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${sender}-message`;
+            messageEl.innerHTML = `<strong>${sender === 'user' ? 'You' : 'Finley'}:</strong> ${message}`;
+            conversationEl.appendChild(messageEl);
+            conversationEl.scrollTop = conversationEl.scrollHeight;
+        }
+
+        async function connectToVoiceChat() {
+            try {
+                updateStatus('🟡 Connecting to voice chat...', 'connecting');
+                connectBtn.disabled = true;
+
+                addDebugMessage('Starting bot session...');
+                
+                // Start bot session
+                const response = await fetch('http://localhost:7860/api/v1/bots/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        room_name: `finley-${Date.now()}`,
+                        access_token: null // Could be passed from parent app
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                currentBotId = data.bot_id;
+                
+                addDebugMessage(`Bot started with ID: ${currentBotId}`);
+                addDebugMessage(`Room URL: ${data.room_url}`);
+
+                // Create Daily call frame
+                callFrame = DailyIframe.createFrame({
+                    iframeStyle: {
+                        position: 'fixed',
+                        top: '10px',
+                        right: '10px',
+                        width: '300px',
+                        height: '200px',
+                        border: '1px solid #ccc',
+                        borderRadius: '10px',
+                        zIndex: 1000
+                    },
+                    showLeaveButton: true,
+                    showFullscreenButton: false,
+                    showLocalVideo: false,
+                    showParticipantsBar: false
+                });
+
+                // Set up event listeners
+                callFrame
+                    .on('joined-meeting', handleJoinedMeeting)
+                    .on('left-meeting', handleLeftMeeting)
+                    .on('participant-joined', handleParticipantJoined)
+                    .on('participant-left', handleParticipantLeft)
+                    .on('error', handleError);
+
+                // Join the room
+                await callFrame.join({
+                    url: data.room_url,
+                    token: data.token,
+                    userName: 'User',
+                    startVideoOff: true,
+                    startAudioOff: true // Start muted
+                });
+
+            } catch (error) {
+                console.error('Connection failed:', error);
+                updateStatus(`❌ Connection failed: ${error.message}`, 'disconnected');
+                connectBtn.disabled = false;
+                addDebugMessage(`Connection error: ${error.message}`);
+            }
+        }
+
+        async function disconnectVoiceChat() {
+            try {
+                updateStatus('🟡 Disconnecting...', 'connecting');
+                
+                if (callFrame) {
+                    await callFrame.leave();
+                    callFrame.destroy();
+                    callFrame = null;
+                }
+
+                if (currentBotId) {
+                    // Stop bot session
+                    await fetch('http://localhost:7860/api/v1/bots/stop', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bot_id: currentBotId })
+                    });
+                    addDebugMessage(`Stopped bot ${currentBotId}`);
+                    currentBotId = null;
+                }
+
+                updateStatus('🔴 Disconnected', 'disconnected');
+                resetUI();
+
+            } catch (error) {
+                console.error('Disconnect failed:', error);
+                addDebugMessage(`Disconnect error: ${error.message}`);
+                resetUI();
+            }
+        }
+
+        async function toggleMicrophone() {
+            if (!callFrame || !isConnected) return;
+
+            try {
+                const newMutedState = !isMuted;
+                await callFrame.setLocalAudio(!newMutedState);
+                
+                isMuted = newMutedState;
+                updateMicrophoneUI();
+                
+                addDebugMessage(`Microphone ${isMuted ? 'muted' : 'unmuted'}`);
+            } catch (error) {
+                console.error('Microphone toggle failed:', error);
+                addDebugMessage(`Microphone error: ${error.message}`);
+            }
+        }
+
+        function handleJoinedMeeting(event) {
+            console.log('Joined meeting:', event);
+            updateStatus('🟢 Connected - Voice chat ready!', 'connected');
+            isConnected = true;
+            
+            connectBtn.disabled = true;
+            disconnectBtn.disabled = false;
+            micBtn.disabled = false;
+            
+            addDebugMessage('Successfully joined Daily.co room');
+            addConversationMessage('bot', 'Hello! I\'m Finley, your voice AI assistant. Unmute your microphone and start talking!');
+        }
+
+        function handleLeftMeeting(event) {
+            console.log('Left meeting:', event);
+            isConnected = false;
+            resetUI();
+            addDebugMessage('Left Daily.co room');
+        }
+
+        function handleParticipantJoined(event) {
+            console.log('Participant joined:', event);
+            addDebugMessage(`Participant joined: ${event.participant.user_name || 'Unknown'}`);
+            
+            if (event.participant.user_name === 'Finley Financial Assistant') {
+                addConversationMessage('bot', 'I\'ve joined the conversation! Feel free to ask me anything about your finances.');
+            }
+        }
+
+        function handleParticipantLeft(event) {
+            console.log('Participant left:', event);
+            addDebugMessage(`Participant left: ${event.participant.user_name || 'Unknown'}`);
+        }
+
+        function handleError(event) {
+            console.error('Daily.co error:', event);
+            updateStatus(`❌ Connection error: ${event.errorMsg}`, 'disconnected');
+            addDebugMessage(`Daily.co error: ${event.errorMsg}`);
+            resetUI();
+        }
+
+        function updateMicrophoneUI() {
+            if (isMuted) {
+                micBtn.className = 'mic-button muted';
+                micBtn.textContent = '🎤';
+                micStatus.textContent = 'Microphone: Off';
+            } else {
+                micBtn.className = 'mic-button listening';
+                micBtn.textContent = '🔊';
+                micStatus.textContent = 'Microphone: On - Listening...';
+            }
+        }
+
+        function resetUI() {
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            micBtn.disabled = true;
+            isMuted = true;
+            updateMicrophoneUI();
+        }
+
+        // Initialize UI
+        updateMicrophoneUI();
+        addDebugMessage('Client initialized - ready to connect');
+
+        // Check server health on load
+        fetch('http://localhost:7860/api/health')
+            .then(response => response.json())
+            .then(data => {
+                addDebugMessage('Server health check passed');
+                addDebugMessage(`Services: ${JSON.stringify(data.services)}`);
+            })
+            .catch(error => {
+                addDebugMessage(`Server health check failed: ${error.message}`);
+                updateStatus('❌ Cannot connect to Pipecat server (port 7860)', 'disconnected');
+            });
+    </script>
+</body>
+</html> 

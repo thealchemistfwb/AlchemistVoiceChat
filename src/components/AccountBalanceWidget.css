@@ -1,0 +1,198 @@
+.account-balance-widget {
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid #e5e7eb;
+  padding: 16px;
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+
+.account-balance-widget::-webkit-scrollbar {
+  width: 6px;
+}
+
+.account-balance-widget::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.account-balance-widget::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 3px;
+}
+
+.widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.widget-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.account-count {
+  font-size: 12px;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.account-card {
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 12px;
+  border-left: 4px solid;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.account-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.account-header {
+  margin-bottom: 8px;
+}
+
+.account-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 2px;
+  line-height: 1.2;
+}
+
+.account-type {
+  font-size: 11px;
+  color: #6b7280;
+  text-transform: capitalize;
+}
+
+.account-balance {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  display: flex;
+  align-items: center;
+}
+
+.debt-indicator {
+  color: #dc2626;
+  margin-right: 2px;
+}
+
+.available-balance {
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 4px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+}
+
+/* Pastel color themes for positive cash flow (assets) */
+.account-card.emerald {
+  border-left-color: #10b981;
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+}
+
+.account-card.blue {
+  border-left-color: #3b82f6;
+  background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
+}
+
+.account-card.cyan {
+  border-left-color: #06b6d4;
+  background: linear-gradient(135deg, #ecfeff 0%, #f0fdff 100%);
+}
+
+.account-card.teal {
+  border-left-color: #14b8a6;
+  background: linear-gradient(135deg, #f0fdfa 0%, #f0fdf4 100%);
+}
+
+.account-card.green {
+  border-left-color: #22c55e;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+}
+
+.account-card.mint {
+  border-left-color: #84cc16;
+  background: linear-gradient(135deg, #f7fee7 0%, #ecfdf5 100%);
+}
+
+.account-card.purple {
+  border-left-color: #8b5cf6;
+  background: linear-gradient(135deg, #f5f3ff 0%, #faf5ff 100%);
+}
+
+.account-card.indigo {
+  border-left-color: #6366f1;
+  background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
+}
+
+.account-card.violet {
+  border-left-color: #a855f7;
+  background: linear-gradient(135deg, #faf5ff 0%, #f5f3ff 100%);
+}
+
+/* Warmer colors for negative cash flow (liabilities) */
+.account-card.amber {
+  border-left-color: #f59e0b;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+}
+
+.account-card.red {
+  border-left-color: #ef4444;
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+}
+
+.account-card.orange {
+  border-left-color: #f97316;
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+}
+
+.account-card.pink {
+  border-left-color: #ec4899;
+  background: linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%);
+}
+
+.account-card.gray {
+  border-left-color: #6b7280;
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+}
+
+@media (max-width: 768px) {
+  .accounts-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 6px;
+  }
+  
+  .account-card {
+    padding: 8px;
+  }
+  
+  .account-balance {
+    font-size: 14px;
+  }
+  
+  .account-name {
+    font-size: 12px;
+  }
+}

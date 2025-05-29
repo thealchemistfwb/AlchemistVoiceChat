@@ -1,70 +1,150 @@
-# Getting Started with Create React App
+# 🎤 AlchemistVoiceChat
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A sophisticated AI-powered voice chat application featuring real-time speech-to-speech conversation with **Google Gemini Live API**, financial insights through **Plaid integration**, and advanced voice synthesis.
 
-## Available Scripts
+## ✨ Features
 
-In the project directory, you can run:
+### 🎯 Core Features
+- **🎙️ Real-time Voice Chat** - Powered by Google Gemini Live API for native speech-to-speech communication
+- **💰 Financial Assistant** - Integration with Plaid for banking data analysis and insights
+- **📊 Interactive Charts** - Visual spending analysis and financial summaries
+- **🗣️ High-Quality Voice Synthesis** - Multiple voice options via Cartesia API
+- **🎥 Video Chat Support** - Daily.co integration for enhanced communication
 
-### `npm start`
+### 🔧 Technical Features
+- **⚡ Real-time Audio Streaming** - WebRTC-based audio pipeline
+- **🌐 Serverless Deployment** - Optimized for Vercel with automatic scaling
+- **🔒 Secure API Integration** - Protected environment variables and secure endpoints
+- **📱 Responsive Design** - Works seamlessly across desktop and mobile devices
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## 🚀 Quick Start
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### Prerequisites
+- Node.js 18+ 
+- Google AI API key (for Gemini Live)
+- Plaid API credentials
+- Optional: Cartesia, Daily.co, OpenAI API keys
 
-### `npm test`
+### Local Development
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/AlchemistVoiceChat.git
+   cd AlchemistVoiceChat
+   ```
 
-### `npm run build`
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+3. **Set up environment variables:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+4. **Start the development servers:**
+   ```bash
+   # Terminal 1: Start backend
+   cd backend && npm start
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+   # Terminal 2: Start frontend  
+   npm start
+   ```
 
-### `npm run eject`
+5. **Open your browser:**
+   ```
+   http://localhost:3000
+   ```
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## 🌐 Deployment to Vercel
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+1. **Push to GitHub:**
+   ```bash
+   git add .
+   git commit -m "Deploy to Vercel"
+   git push origin main
+   ```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+2. **Deploy to Vercel:**
+   - Import your GitHub repository at [vercel.com](https://vercel.com)
+   - Add environment variables in project settings
+   - Deploy automatically!
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+3. **Required Environment Variables:**
+   ```
+   GOOGLE_AI_API_KEY=your_google_ai_key
+   PLAID_CLIENT_ID=your_plaid_client_id  
+   PLAID_SECRET=your_plaid_secret
+   PLAID_ENV=sandbox
+   ```
 
-## Learn More
+   **Optional:**
+   ```
+   CARTESIA_API_KEY=your_cartesia_key
+   DAILY_API_KEY=your_daily_key
+   OPENAI_API_KEY=your_openai_key
+   ```
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## 🏗️ Architecture
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+```
+AlchemistVoiceChat/
+├── 📁 src/                    # React frontend
+│   ├── 📁 components/         # UI components
+│   └── 📁 utils/              # Utility functions
+├── 📁 backend/                # Express.js API server
+│   ├── 📄 server.js           # Main server file
+│   ├── 📄 plaidClient.js      # Plaid integration
+│   ├── 📄 cartesiaService.js  # Voice synthesis
+│   └── 📄 geminiLiveStreamingService.js # Gemini Live API
+├── 📁 api/                    # Vercel serverless functions
+├── 📄 vercel.json             # Vercel configuration
+└── 📄 package.json            # Dependencies and scripts
+```
 
-### Code Splitting
+## 🎯 Key Technologies
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+- **Frontend:** React 19, Chart.js, Web Audio API
+- **Backend:** Express.js, WebSocket, Multer
+- **AI/Voice:** Google Gemini Live API, Cartesia, OpenAI Whisper
+- **Financial:** Plaid API for banking integration
+- **Deployment:** Vercel serverless functions
+- **Real-time:** WebRTC, WebSocket connections
 
-### Analyzing the Bundle Size
+## 🎮 Usage
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+### Voice Chat
+1. Click "Start Gemini Live Streaming"
+2. Allow microphone permissions
+3. Click "Start Streaming" 
+4. Speak naturally - the AI responds in real-time!
 
-### Making a Progressive Web App
+### Financial Analysis  
+1. Connect your bank account via Plaid
+2. Ask questions like "What did I spend on groceries?"
+3. View interactive charts and spending insights
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+## 🤝 Contributing
 
-### Advanced Configuration
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+## 📝 License
 
-### Deployment
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+## 🙏 Acknowledgments
 
-### `npm run build` fails to minify
+- **Google** for the incredible Gemini Live API
+- **Plaid** for secure financial data integration  
+- **Cartesia** for high-quality voice synthesis
+- **Vercel** for seamless deployment platform
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+---
+
+Built with ❤️ for the future of conversational AI
