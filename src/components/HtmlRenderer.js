@@ -21,7 +21,7 @@ const HtmlRenderer = ({ content, sender }) => {
       'class', 'id', 'style', 'href', 'src', 'alt', 'title',
       'target', 'rel'
     ],
-    ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|data):|[^a-z]|[a-z+.\\-]+(?:[^a-z+.\\-:]|$))/i
+    ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i
   });
 
   // If content doesn't contain HTML tags, wrap it in a paragraph
