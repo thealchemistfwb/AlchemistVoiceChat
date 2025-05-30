@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './BudgetWidget.css';
 
 const BudgetWidget = ({ userId = "test_user" }) => {
@@ -30,7 +30,7 @@ const BudgetWidget = ({ userId = "test_user" }) => {
     }
   };
 
-  const fetchBudgetData = async () => {
+  const fetchBudgetData = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -66,11 +66,11 @@ const BudgetWidget = ({ userId = "test_user" }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
 
   useEffect(() => {
     fetchBudgetData();
-  }, [userId]);
+  }, [fetchBudgetData]);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
