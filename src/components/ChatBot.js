@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import VoiceChatGeminiLiveStreaming from './VoiceChatGeminiLiveStreaming';
 import PlaidLinkButton from './PlaidLink';
 import AccountBalanceWidget from './AccountBalanceWidget';
+import BudgetWidget from './BudgetWidget';
 import HtmlRenderer from './HtmlRenderer';
 import ChartRenderer from './ChartRenderer';
 import './ChatBot.css';
@@ -190,97 +191,156 @@ const ChatBot = () => {
   };
 
   return (
-    <div className="chatbot-container">
-      <div className="chatbot-header">
-        <h2>Financial Insights Assistant</h2>
-        <div className="header-controls">
-          <div className="chat-mode-toggle">
-            <button 
-              className={`mode-button ${!voiceChatMode ? 'active' : ''}`}
-              onClick={() => setVoiceChatMode(false)}
-            >
-              💬 Text Chat
-            </button>
-            <button 
-              className={`mode-button ${voiceChatMode ? 'active' : ''}`}
-              onClick={() => setVoiceChatMode(true)}
-            >
-              🎤 Voice Chat
-            </button>
-          </div>
-          <div className="plaid-connection-section">
-            <PlaidLinkButton 
-              onSuccess={handlePlaidSuccess}
-              onError={handlePlaidError}
-              isConnected={isConnected}
-              connectedBank={connectedBank}
-            />
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-center items-center h-16">
+            <h1 className="text-2xl font-bold text-gray-900">Financial Insights Assistant</h1>
           </div>
         </div>
       </div>
-      {accountBalances.length > 0 && (
-        <AccountBalanceWidget balances={accountBalances} />
-      )}
-      
-      {/* Voice Chat Interface */}
-      {voiceChatMode && (
-        <VoiceChatGeminiLiveStreaming 
-          accessToken={accessToken}
-          onMessageUpdate={handleVoiceMessage}
-        />
-      )}
-      
-      {/* Text Chat Interface */}
-      {!voiceChatMode && (
-        <>
-          <div className="chatbot-messages">
-        {messages.map((message) => (
-          <div key={message.id} className={`message ${message.sender}`}>
-            <div className="message-content">
-              <HtmlRenderer content={message.text} sender={message.sender} />
-              {message.charts && message.charts.length > 0 && (
-                <div className="message-charts">
-                  {message.charts.map((chart, index) => (
-                    <ChartRenderer key={`${message.id}-chart-${index}`} chartData={chart} />
-                  ))}
+
+      {/* Two-column layout */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-8rem)]">
+          
+          {/* Left Sidebar */}
+          <div className="w-full lg:w-80 flex-shrink-0 space-y-6 overflow-y-auto">
+            {/* Chat Mode Toggle */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Chat Mode</h3>
+              <div className="flex space-x-3">
+                <button 
+                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
+                    !voiceChatMode 
+                      ? 'bg-blue-600 text-white shadow-md' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                  onClick={() => setVoiceChatMode(false)}
+                >
+                  💬 Text Chat
+                </button>
+                <button 
+                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
+                    voiceChatMode 
+                      ? 'bg-blue-600 text-white shadow-md' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                  onClick={() => setVoiceChatMode(true)}
+                >
+                  🎤 Voice Chat
+                </button>
+              </div>
+            </div>
+
+            {/* Plaid Connection */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Bank Connection</h3>
+              <PlaidLinkButton 
+                onSuccess={handlePlaidSuccess}
+                onError={handlePlaidError}
+                isConnected={isConnected}
+                connectedBank={connectedBank}
+              />
+            </div>
+
+            {/* Account Balances */}
+            {accountBalances.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+                <AccountBalanceWidget balances={accountBalances} />
+              </div>
+            )}
+            
+            {/* Budget Widget */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+              <BudgetWidget userId="test_user" />
+            </div>
+          </div>
+
+          {/* Right Chat Area */}
+          <div className="flex-1 min-w-0">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 h-full flex flex-col">
+              {/* Voice Chat Interface */}
+              {voiceChatMode && (
+                <div className="flex-1 p-6">
+                  <VoiceChatGeminiLiveStreaming 
+                    accessToken={accessToken}
+                    onMessageUpdate={handleVoiceMessage}
+                  />
                 </div>
+              )}
+              
+              {/* Text Chat Interface */}
+              {!voiceChatMode && (
+                <>
+                  {/* Messages Area */}
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                    {messages.map((message) => (
+                      <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-3xl rounded-xl px-4 py-3 ${
+                          message.sender === 'user' 
+                            ? 'bg-blue-600 text-white' 
+                            : 'bg-gray-100 text-gray-900'
+                        }`}>
+                          <HtmlRenderer content={message.text} sender={message.sender} />
+                          {message.charts && message.charts.length > 0 && (
+                            <div className="mt-4 space-y-4">
+                              {message.charts.map((chart, index) => (
+                                <ChartRenderer key={`${message.id}-chart-${index}`} chartData={chart} />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {isLoading && (
+                      <div className="flex justify-start">
+                        <div className="bg-gray-100 text-gray-900 rounded-xl px-4 py-3">
+                          <div className="flex items-center space-x-2">
+                            <div className="flex space-x-1">
+                              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                            </div>
+                            <span className="text-sm">Thinking...</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Input Area */}
+                  <div className="border-t border-gray-200 p-6">
+                    <div className="flex space-x-4">
+                      <input
+                        type="text"
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        onKeyPress={handleKeyPress}
+                        placeholder="Type your message..."
+                        className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled={isLoading}
+                      />
+                      <button 
+                        onClick={handleSendMessage} 
+                        className={`px-6 py-3 rounded-lg font-medium transition-all duration-200 ${
+                          isLoading || inputValue.trim() === ''
+                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            : 'bg-blue-600 text-white hover:bg-blue-700 shadow-md hover:shadow-lg'
+                        }`}
+                        disabled={isLoading || inputValue.trim() === ''}
+                      >
+                        {isLoading ? 'Sending...' : 'Send'}
+                      </button>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </div>
-        ))}
-        {isLoading && (
-          <div className="message bot">
-            <div className="message-content loading">
-              <div className="typing-indicator">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-              Thinking...
-            </div>
-          </div>
-        )}
-          </div>
-          <div className="chatbot-input">
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Type your message..."
-              className="message-input"
-              disabled={isLoading}
-            />
-            <button 
-              onClick={handleSendMessage} 
-              className="send-button"
-              disabled={isLoading || inputValue.trim() === ''}
-            >
-              {isLoading ? 'Sending...' : 'Send'}
-            </button>
-          </div>
-        </>
-      )}
+        </div>
+      </div>
     </div>
   );
 };
