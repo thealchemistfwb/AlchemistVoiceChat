@@ -15,6 +15,10 @@ import type {
 } from "convex/server";
 import type * as budgets from "../budgets.js";
 import type * as hello from "../hello.js";
+import type * as plaidActions from "../plaidActions.js";
+import type * as recurringTransactions from "../recurringTransactions.js";
+import type * as spendingMoney from "../spendingMoney.js";
+import type * as transactions from "../transactions.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -27,6 +31,10 @@ import type * as hello from "../hello.js";
 declare const fullApi: ApiFromModules<{
   budgets: typeof budgets;
   hello: typeof hello;
+  plaidActions: typeof plaidActions;
+  recurringTransactions: typeof recurringTransactions;
+  spendingMoney: typeof spendingMoney;
+  transactions: typeof transactions;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,

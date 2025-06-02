@@ -1,16 +1,239 @@
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const { GoogleGenAI } = require('@google/genai');
-const { getFinancialSummary, plaidClient } = require('./plaidClient');
+const { GoogleGenAI, Type } = require('@google/genai');
+const OllamaService = require('./ollamaService');
+const { getFinancialSummary, plaidClient, getAccountBalances } = require('./plaidClient');
 const { generateChart } = require('./chartTools');
 const { textToSpeech, streamTextToSpeech, cleanTextForSpeech } = require('./cartesiaService');
 const DailyService = require('./dailyService');
 const GeminiLiveStreamingService = require('./geminiLiveStreamingService');
+const convexService = require('./convexService');
 const OpenAI = require('openai');
 const http = require('http');
 const WebSocket = require('ws');
 require('dotenv').config();
+const { getRecurringTransactions, detectRecurringTransactions } = require('./recurringTransactions');
+
+// Test user flag - set to false for production
+const USE_TEST_USER = process.env.USE_TEST_USER !== 'false';
+const TEST_USER_ID = 'test_user';
+
+console.log(`🧪 Test user mode: ${USE_TEST_USER ? 'ENABLED' : 'DISABLED'}`);
+
+// Convert plain text to HTML formatting
+function convertToHTML(text) {
+  if (typeof text !== 'string') {
+    if (text === undefined || text === null) return '';
+    return `<pre>${JSON.stringify(text, null, 2)}</pre>`;
+  }
+  if (!text) return '';
+
+  // 1. Process <think> tags first
+  let processedText = text.replace(/<think>([\s\S]*?)<\/think>/g, 
+    '<div class="ai-thought collapsible collapsed">' +
+    '  <button class="ai-thought-toggle" aria-expanded="false">Show Thoughts</button>' +
+    '  <div class="ai-thought-content">$1</div>' +
+    '</div>'
+  );
+
+  // If the original text (after think tag processing) already has common HTML block tags, return as-is.
+  // This avoids double-processing or breaking pre-formatted HTML from the AI.
+  if (processedText.match(/<(h[1-6]|p|ul|ol|li|blockquote|pre|div)( |>)/i) && !text.startsWith("<think>")) {
+    // If it only contains our new ai-thought div, we should still process paragraphs for content outside thoughts.
+    // This condition is tricky. The goal is to avoid wrapping already well-formed HTML in <p> tags unnecessarily.
+    // A simpler check: if it contains <h3> or <p> already from the AI (not our .ai-thought), consider it pre-formatted.
+    if (text.includes('<h3>') || text.includes('<p>')) {
+        // If it also had think tags, we've processed them. Now return.
+        return processedText;
+    }
+    // If it was *only* think tags, it won't have h3/p, so it will fall through to paragraph processing, which is fine.
+  }
+  
+  // Split into paragraphs and convert the processedText
+  const paragraphs = processedText.split('\\n\\n').filter(p => p.trim());
+  let html = '';
+  
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i].trim();
+    if (!para) continue;
+
+    // If the paragraph is an .ai-thought div, keep it as is.
+    if (para.startsWith('<div class="ai-thought">')) {
+      html += para;
+      continue;
+    }
+    
+    // First paragraph becomes header if it's short and doesn't have special formatting
+    if (i === 0 && para.length < 60 && !para.includes('*') && !para.includes('-') && !para.startsWith('<div')) {
+      html += `<h3>${para}</h3>`;
+    } else {
+      // Convert markdown-style formatting
+      let htmlPara = para
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
+        .replace(/\*(.*?)\*/g, '<em>$1</em>') // Italic
+        .replace(/\\n/g, '<br>'); // Line breaks
+      
+      // Handle bullet points
+      if (htmlPara.includes('•') || htmlPara.includes('*   ')) {
+        const lines = htmlPara.split('<br>'); // Split by <br> now
+        const listItems = lines
+          .filter(line => line.trim().startsWith('•') || line.trim().startsWith('*'))
+          .map(line => `<li>${line.replace(/^[•*]\\s*/, '').trim()}</li>`)
+          .join('');
+        
+        if (listItems) {
+          html += `<ul>${listItems}</ul>`;
+        } else {
+          html += `<p>${htmlPara}</p>`;
+        }
+      } else {
+        html += `<p>${htmlPara}</p>`;
+      }
+    }
+  }
+  
+  return html || `<p>${processedText}</p>`; // Fallback for empty or non-paragraph content
+}
+
+// Transaction categorization handler
+async function handleTransactionCategorization(message, botMessage, res) {
+  console.log('🔧 DEBUG: Checking for transaction categorization...');
+  
+  const shouldCategorize = message.toLowerCase().includes('categor') || 
+                          message.toLowerCase().includes('tx_') ||
+                          message.toLowerCase().includes('transaction') ||
+                          message.toLowerCase().includes('uncategorized') ||
+                          message.toLowerCase().includes('budget');
+  
+  console.log('🔧 DEBUG: Should categorize:', shouldCategorize);
+  
+  if (shouldCategorize) {
+    console.log('🔧 DEBUG: Checking for uncategorized transactions...');
+    
+    try {
+      const userId = USE_TEST_USER ? TEST_USER_ID : 'default_user';
+      
+      // Get uncategorized transactions from Convex
+      const uncategorizedTxs = await convexService.getUncategorizedTransactions(userId);
+      console.log(`🔧 DEBUG: Found ${uncategorizedTxs.length} uncategorized transactions`);
+      
+      if (uncategorizedTxs.length > 0) {
+        // Show uncategorized transactions for user to categorize
+        botMessage += `\n\n💡 I found ${uncategorizedTxs.length} uncategorized transaction${uncategorizedTxs.length > 1 ? 's' : ''} that need${uncategorizedTxs.length === 1 ? 's' : ''} your attention:\n\n`;
+        
+        const transactionsToShow = uncategorizedTxs.slice(0, 5); // Show first 5
+        
+        for (const tx of transactionsToShow) {
+          const amount = Math.abs(tx.amount || 0);
+          const merchant = tx.enrichedMerchantName || tx.merchantName || tx.description || 'Unknown';
+          const date = new Date(tx.date).toLocaleDateString();
+          
+          // AI-powered category suggestion based on merchant/description
+          let suggestion = 'wild_cards';
+          let confidence = 0.6;
+          
+          const merchantLower = merchant.toLowerCase();
+          const descLower = (tx.description || '').toLowerCase();
+          
+          if (merchantLower.includes('starbucks') || merchantLower.includes('coffee') || 
+              merchantLower.includes('netflix') || merchantLower.includes('spotify') ||
+              descLower.includes('entertainment') || descLower.includes('restaurant')) {
+            suggestion = 'delights';
+            confidence = 0.8;
+          } else if (merchantLower.includes('grocery') || merchantLower.includes('gas') ||
+                    merchantLower.includes('rent') || merchantLower.includes('mortgage') ||
+                    merchantLower.includes('utility') || descLower.includes('insurance')) {
+            suggestion = 'foundations';
+            confidence = 0.9;
+          } else if (merchantLower.includes('investment') || merchantLower.includes('saving') ||
+                    descLower.includes('transfer') || descLower.includes('deposit')) {
+            suggestion = 'nest_egg';
+            confidence = 0.7;
+          }
+          
+          botMessage += `**${tx.txId}** - ${merchant}\n`;
+          botMessage += `   $${amount.toFixed(2)} on ${date}\n`;
+          botMessage += `   🤖 Suggested: **${suggestion}** (${Math.round(confidence * 100)}% confidence)\n\n`;
+          
+          // Auto-categorize high confidence suggestions
+          if (confidence >= 0.8) {
+            try {
+              await convexService.suggestCategory(tx.txId, suggestion, confidence);
+              console.log(`🔧 DEBUG: Auto-categorized ${tx.txId} as ${suggestion}`);
+            } catch (error) {
+              console.error(`🔧 DEBUG: Error auto-categorizing ${tx.txId}:`, error);
+            }
+          }
+        }
+        
+        if (uncategorizedTxs.length > 5) {
+          botMessage += `... and ${uncategorizedTxs.length - 5} more transactions\n\n`;
+        }
+        
+        botMessage += `💬 Say something like "categorize tx_123 as delights" to manually categorize, or I can auto-categorize high-confidence suggestions for you!`;
+      }
+      
+      // Handle explicit transaction ID categorization
+      const txIdPattern = /tx_(\w+)/g;
+      let txMatch;
+      const autoFunctionCalls = [];
+      
+      while ((txMatch = txIdPattern.exec(message)) !== null) {
+        const txId = `tx_${txMatch[1]}`;
+        
+        // Determine category based on transaction context in the message
+        let suggestion = 'wild_cards';
+        let confidence = 0.6;
+        
+        const lowerMessage = message.toLowerCase();
+        if (lowerMessage.includes('delights') || lowerMessage.includes('entertainment')) {
+          suggestion = 'delights';
+          confidence = 0.9;
+        } else if (lowerMessage.includes('foundations') || lowerMessage.includes('essential')) {
+          suggestion = 'foundations';
+          confidence = 0.9;
+        } else if (lowerMessage.includes('nest_egg') || lowerMessage.includes('saving')) {
+          suggestion = 'nest_egg';
+          confidence = 0.9;
+        } else if (lowerMessage.includes('wild_cards') || lowerMessage.includes('misc')) {
+          suggestion = 'wild_cards';
+          confidence = 0.9;
+        }
+        
+        autoFunctionCalls.push({ name: 'suggestCategory', args: { txId, suggestion, confidence } });
+        
+        // Execute the function call
+        try {
+          console.log(`🔧 DEBUG: Auto-executing suggestCategory - ${txId}: ${suggestion} (${confidence})`);
+          await convexService.suggestCategory(txId, suggestion, confidence);
+          console.log('🔧 DEBUG: Category suggested successfully');
+        } catch (error) {
+          console.error(`🔧 DEBUG: Error executing auto suggestCategory:`, error);
+        }
+      }
+      
+      if (autoFunctionCalls.length > 0) {
+        botMessage += `\n\n✅ I've categorized ${autoFunctionCalls.length} transaction${autoFunctionCalls.length > 1 ? 's' : ''} for you:\n`;
+        autoFunctionCalls.forEach(call => {
+          const { txId, suggestion, confidence } = call.args;
+          botMessage += `• ${txId}: **${suggestion}** (${Math.round(confidence * 100)}% confidence)\n`;
+        });
+      }
+      
+    } catch (error) {
+      console.error('🔧 DEBUG: Error in transaction categorization:', error);
+      botMessage += `\n\n❌ I had trouble accessing your transaction data. Please make sure your bank account is connected.`;
+    }
+  }
+  
+  // Send the response
+  res.json({
+    message: botMessage,
+    timestamp: new Date().toISOString(),
+    hasFinancialData: false
+  });
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -29,10 +252,14 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Initialize Google AI
-const genAI = new GoogleGenAI({
-  apiKey: process.env.GOOGLE_AI_API_KEY
-});
+// AI Provider Configuration
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3:4b';
+
+let aiService;
+
+console.log('🦙 Using Ollama AI Service');
+aiService = new OllamaService(OLLAMA_URL, OLLAMA_MODEL);
 
 // Initialize OpenAI for Whisper STT
 const openai = new OpenAI({
@@ -47,11 +274,6 @@ const upload = multer({
   }
 });
 
-if (!process.env.GOOGLE_AI_API_KEY) {
-  console.error('GOOGLE_AI_API_KEY is required. Please set it in your .env file.');
-  process.exit(1);
-}
-
 // Warn if Cartesia is not configured (voice features will be disabled)
 if (!process.env.CARTESIA_API_KEY) {
   console.warn('⚠️  CARTESIA_API_KEY not set. Voice chat features will be disabled.');
@@ -65,9 +287,10 @@ const voiceSessions = new Map();
 const geminiLiveSessions = new Map();
 
 class RealTimeVoiceSession {
-  constructor(sessionId, userId = 'default') {
+  constructor(sessionId, userId = 'default', accessToken = null) {
     this.sessionId = sessionId;
     this.userId = userId;
+    this.accessToken = accessToken;
     this.isActive = false;
     this.conversationHistory = [];
     this.dailyRoom = null;
@@ -224,7 +447,7 @@ class RealTimeVoiceSession {
         const fullTranscript = this.accumulatedTranscripts.join(' ').trim();
         console.log(`⏱️ Processing debounced speech: "${fullTranscript}"`);
         
-        await this.processVoiceInput(fullTranscript);
+        await this.processVoiceInput(fullTranscript, this.accessToken);
         
         // Clear accumulated transcripts
         this.accumulatedTranscripts = [];
@@ -234,7 +457,7 @@ class RealTimeVoiceSession {
     console.log(`⏳ Speech debounced, waiting ${this.speechDelay}ms for more input...`);
   }
 
-  async processVoiceInput(transcript) {
+  async processVoiceInput(transcript, accessToken = null) {
     if (this.isProcessing) {
       console.log(`🛑 Interruption detected in session ${this.sessionId}`);
       this.isProcessing = false;
@@ -252,8 +475,8 @@ class RealTimeVoiceSession {
         content: transcript
       });
 
-      // Get AI response using existing genAI service
-      const aiResponse = await this.getAIResponse();
+      // Get AI response using existing genAI service with financial context
+      const aiResponse = await this.getAIResponse(accessToken || this.accessToken);
       console.log(`🤖 Finley (${this.sessionId}): ${aiResponse}`);
 
       // Convert to speech and send response
@@ -272,15 +495,74 @@ class RealTimeVoiceSession {
     }
   }
 
-  async getAIResponse() {
+  async getAIResponse(accessToken = null) {
     try {
+      // Get financial context if access token is available
+      let financialContext = '';
+      if (accessToken) {
+        try {
+          console.log('🤖 Fetching financial data for voice AI context...');
+          const financialData = await getFinancialSummary(accessToken);
+          
+          financialContext = `
+=== FINANCIAL CONTEXT FROM CONNECTED PLAID ACCOUNT (Last 30 days) ===
+
+ACCOUNT BALANCES:
+${financialData.balances.map(acc => `- ${acc.name} (${acc.type}): $${acc.balances.current || 'N/A'}`).join('\n')}
+
+SUMMARY STATISTICS:
+- Total Balance Across All Accounts: $${financialData.summary.totalBalance}
+- Total Spending in Period: $${financialData.summary.monthlySpending}
+- Number of Transactions Found: ${financialData.summary.transactionCount}
+
+TOP SPENDING CATEGORIES (AI-powered custom categorization):
+${financialData.summary.topCategories.length > 0 ? 
+  financialData.summary.topCategories.map(cat => 
+    `- ${cat.category}: $${cat.amount} (${cat.subcategories.map(sub => `${sub.subcategory}: $${sub.amount}`).join(', ')})`
+  ).join('\n') : 
+  '- No transactions found in this period'}
+
+=== END OF ACTUAL FINANCIAL DATA ===`;
+        } catch (error) {
+          console.error('❌ Error fetching financial data for voice:', error);
+          financialContext = '\nNote: Unable to fetch current financial data for this conversation.';
+        }
+      }
+
+      // Voice-optimized system prompt with financial context
+      const systemPrompt = `
+✨  FINLEY – Voice Financial Assistant
+────────────────────────────────────
+
+You are Finley, a warm voice assistant helping with financial questions.
+
+VOICE RESPONSE RULES:
+• Keep responses under 3 sentences for real-time conversation
+• Use plain text only - no HTML formatting for voice synthesis
+• No charts in voice responses - describe data instead
+• Be warm and encouraging, like talking to a friend
+
+DATA RULES (CRITICAL):
+1. Only discuss facts from FINANCIAL CONTEXT or calculations from those facts
+2. Never fabricate, guess, or estimate any financial data
+3. If data isn't available, say "I don't have that information from your connected account"
+4. No financial advice or product recommendations
+
+TONE: Conversational, warm, and supportive - like a knowledgeable friend helping with money questions.
+
+FINANCIAL CONTEXT:
+${financialContext}`;
+
       // Keep conversation history manageable for real-time responses
-      const recentHistory = this.conversationHistory.slice(-8);
+      const recentHistory = this.conversationHistory.slice(-6);
       
-      const prompt = recentHistory.map(msg => 
-        msg.role === 'system' ? msg.content : 
-        `${msg.role === 'user' ? 'User' : 'Finley'}: ${msg.content}`
-      ).join('\n\n');
+      let prompt = systemPrompt;
+      if (recentHistory.length > 1) {
+        const historyText = recentHistory.slice(1).map(msg => 
+          `${msg.role === 'user' ? 'User' : 'Finley'}: ${msg.content}`
+        ).join('\n');
+        prompt += `\n\nPrevious conversation:\n${historyText}`;
+      }
 
       const response = await genAI.models.generateContent({
         model: 'gemini-2.5-flash-preview-05-20',
@@ -358,270 +640,227 @@ class RealTimeVoiceSession {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, conversationHistory = [], accessToken } = req.body;
-
+    const { message, conversationHistory = [], accessToken, accountBalances, userId } = req.body || {};
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    let financialContext = '';
-    if (accessToken) {
-      try {
-        console.log('🤖 Fetching financial data for AI context...');
-        const financialData = await getFinancialSummary(accessToken);
-        
-        financialContext = `
-=== FINANCIAL CONTEXT FROM CONNECTED PLAID ACCOUNT (Last 30 days) ===
-
-ACCOUNT BALANCES:
-${financialData.balances.map(acc => `- ${acc.name} (${acc.type}): $${acc.balances.current || 'N/A'}`).join('\n')}
-
-SUMMARY STATISTICS:
-- Total Balance Across All Accounts: $${financialData.summary.totalBalance}
-- Total Spending in Period: $${financialData.summary.monthlySpending}
-- Number of Transactions Found: ${financialData.summary.transactionCount}
-
-TOP SPENDING CATEGORIES (AI-powered custom categorization):
-${financialData.summary.topCategories.length > 0 ? 
-  financialData.summary.topCategories.map(cat => 
-    `- ${cat.category}: $${cat.amount}\n${cat.subcategories.map(sub => `  • ${sub.subcategory}: $${sub.amount}`).join('\n')}`
-  ).join('\n') : 
-  '- No spending categories found in this period'}
-
-TOP MERCHANTS (from actual transactions):
-${financialData.summary.topMerchants.length > 0 ? 
-  financialData.summary.topMerchants.map(merch => `- ${merch.merchant}: $${merch.amount}`).join('\n') : 
-  '- No merchant data found in this period'}
-
-ACTUAL RECENT TRANSACTIONS (up to 10 most recent with AI categorization and enrichment):
-${financialData.recentTransactions.length > 0 ? 
-  financialData.recentTransactions.map(t => {
-    const merchantDisplay = t.enrichedMerchantName || t.merchantName || t.name;
-    const enrichmentInfo = t.merchantLogo ? ' 🏪' : '';
-    return `- ${t.date}: ${merchantDisplay}${enrichmentInfo} - $${t.amount.toFixed(2)} [${t.customCategory}: ${t.customSubcategory}]`;
-  }).join('\n') : 
-  '- No transactions found in this period'}
-
-=== END OF ACTUAL FINANCIAL DATA ===`;
-
-        console.log('🧠 FINANCIAL CONTEXT BEING SENT TO AI:');
-        console.log('='.repeat(80));
-        console.log(financialContext);
-        console.log('='.repeat(80));
-        
-      } catch (error) {
-        console.error('❌ Error fetching financial data:', error);
-        financialContext = '\nNote: Unable to fetch current financial data for this conversation.';
-      }
-    }
-
-    const systemPrompt = `
-✨  FINLEY – Your Friendly Financial-Wellbeing Companion
-───────────────────────────────────────────────────────
-
-1.  Mission & Personality
-   • You are **Finley**, a warm, judgment-free guide who helps people make sense of their money.  
-   • You speak in everyday language, encourage questions, and celebrate small wins.
-
-2.  Non-Negotiable Data Guardrails
-   1. Discuss only facts found in FINANCIAL CONTEXT **or** calculations derived from those facts (e.g., totals, averages, percentages).  
-   2. Never fabricate, guess, or estimate balances, transactions, projections, or dates.  
-   3. If the answer truly is not in the data (even after reasonable calculation), reply:  
-      "I don't have that information from your connected account."  
-   4. If FINANCIAL CONTEXT is empty, say:  
-      "It looks like no bank account is connected yet."  
-   5. Do not give personalised financial advice or product recommendations.  
-   6. Never imply Google, Plaid, or any institution endorses Finley.
-
-3.  What You *Can* Do
-   • List or summarise the exact balances and transactions supplied.  
-   • Compute clear arithmetic summaries (e.g., "Your total across all linked accounts is \$12 345.67").  
-   • Compare periods that exist in the data (e.g., "Utilities were \$15 lower this month than last").  
-   • Spot real patterns (categories, frequency, spikes) present in the data.  
-   • Empathise and normalise emotions: "Money can feel stressful—asking is an important first step."  
-   • Invite connection of further accounts or data when missing.
-
-4.  What You *Cannot* Do
-   • Guess future growth, interest, or returns.  
-   • Reveal or misuse trademarks or confidential info.
-
-5.  Tone & Interaction Hints
-   • Natural-language mapping:  
-        – "How much money do I have?" ⇒ sum all current balances provided.  
-        – "Where am I overspending?" ⇒ highlight largest spending categories that exist.  
-   • Gentle boundary: "I'd need data from your savings account before I can total everything."  
-
-6.  Response Format Requirements:
-   • **ALWAYS respond with valid HTML markup** for rich formatting and better readability
-   • Use semantic HTML elements: <h3>, <h4>, <ul>, <ol>, <li>, <table>, <strong>, <em>, <p>, <div>
-   • Use tables for financial data comparisons with <table>, <thead>, <tbody>, <tr>, <th>, <td>
-   • Use lists for multiple items: <ul> for unordered, <ol> for ordered
-   • Use <strong> for emphasis on amounts and important data
-   • Use <em> for subtle emphasis and context
-   • Use CSS classes for styling: 'amount' for money, 'positive' for gains, 'negative' for losses
-   • Example: "<p>Your checking account has <strong class='amount'>$1,234.56</strong> available.</p>"
-   • Example: "<h4>Recent Transactions:</h4><ul><li><strong>McDonald's:</strong> $12.50 on 2024-01-15</li></ul>"
-
-7.  Chart Generation Capabilities - BE VISUAL WHENEVER POSSIBLE:
-   • **ALWAYS generate charts for financial data when listing 3+ items** - users love visual insights!
-   • **MANDATORY chart scenarios:**
-     - Debt breakdown (any debt discussion) → [CHART_REQUEST:{"type":"debt_breakdown","chartType":"auto"}]
-     - Spending by category → [CHART_REQUEST:{"type":"spending_breakdown","chartType":"auto"}] 
-     - Account balances → [CHART_REQUEST:{"type":"balance_overview","chartType":"auto"}]
-     - Recent transactions (when showing spending patterns) → [CHART_REQUEST:{"type":"transaction_breakdown","chartType":"auto"}]
-     - Any subcategory analysis → [CHART_REQUEST:{"type":"subcategory_breakdown","category":"CategoryName","chartType":"auto"}]
-   
-   • **Chart-first mentality**: If you're listing financial data, ask "would this be clearer as a chart?" (answer is usually YES)
-   • **Perfect chart opportunities:**
-     - "Here's your debt breakdown" → ALWAYS include debt chart
-     - "Your spending breakdown shows" → ALWAYS include spending chart  
-     - "Looking at your accounts" → ALWAYS include balance chart
-     - "Recent transactions include" → ALWAYS include transaction chart
-   
-   • Available chart types: spending_breakdown, balance_overview, subcategory_breakdown, spending_analysis, debt_breakdown, transaction_breakdown
-   • Charts enhance understanding and make financial data much more engaging - use them liberally!
-
-7.  Runtime Template (append at run-time):
-   [System] You are Finley. Follow all guardrails above.  
-   FINANCIAL CONTEXT:  
-   ${financialContext}
-`;
-    let prompt = systemPrompt;
-    if (conversationHistory.length > 0) {
-      const historyText = conversationHistory
-        .map(msg => `${msg.sender === 'user' ? 'User' : 'Assistant'}: ${msg.text}`)
-        .join('\n');
-      prompt += `\n\nPrevious conversation:\n${historyText}`;
-    }
-    prompt += `\n\nUser: ${message}\n\nAssistant:`;
-
-    console.log('📝 COMPLETE PROMPT BEING SENT TO GEMINI:');
-    console.log('='.repeat(100));
-    console.log(prompt);
-    console.log('='.repeat(100));
-
-    const response = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash-preview-05-20',
-      contents: prompt,
-    });
-
-    let botMessage = response.text;
-    
-    console.log('🤖 AI RESPONSE RECEIVED:');
-    console.log('='.repeat(60));
-    console.log(botMessage);
-    console.log('='.repeat(60));
-
-    // Validate response if financial data was provided
-    if (accessToken && financialContext) {
-      const hasSpecificNumbers = /\$[\d,]+\.?\d*/.test(botMessage);
-      const hasPlaidData = financialContext.includes('FINANCIAL CONTEXT FROM CONNECTED PLAID ACCOUNT');
-      
-      if (hasSpecificNumbers && hasPlaidData) {
-        console.log('⚠️  VALIDATION: AI response contains financial numbers - checking against Plaid data...');
-        
-        // Extract financial numbers from the context and response for comparison
-        const contextNumbers = financialContext.match(/\$[\d,]+\.?\d*/g) || [];
-        const responseNumbers = botMessage.match(/\$[\d,]+\.?\d*/g) || [];
-        
-        console.log('💰 Numbers in Plaid data:', contextNumbers);
-        console.log('💬 Numbers in AI response:', responseNumbers);
-        
-        // Smart validation: Allow calculated values that can be derived from source data
-        const sourceValues = contextNumbers.map(num => parseFloat(num.replace(/[$,]/g, '')));
-        const responseValues = responseNumbers.map(num => parseFloat(num.replace(/[$,]/g, '')));
-        
-        const hasUnknownNumbers = responseValues.some(responseVal => {
-          // Check if the number exists in source data
-          if (sourceValues.includes(responseVal)) {
-            return false;
+    // 1. Define tools (functions)
+    const tools = [
+      {
+        type: "function",
+        function: {
+          name: "getUncategorizedTransactions",
+          description: "Get a list of uncategorized transactions for the user.",
+          parameters: {
+            type: "object",
+            properties: {
+              userId: { type: "string", description: "The user's ID" }
+            },
+            required: ["userId"]
           }
-          
-          // Check if it could be a reasonable calculation (sum, difference, etc.)
-          const tolerance = 10; // Allow for AI calculation variations and floating point precision
-          
-          // Check if it's a sum of any combination of source values
-          for (let i = 1; i < Math.pow(2, sourceValues.length); i++) {
-            let sum = 0;
-            for (let j = 0; j < sourceValues.length; j++) {
-              if (i & Math.pow(2, j)) {
-                sum += sourceValues[j];
-              }
-            }
-            if (Math.abs(sum - responseVal) < tolerance) {
-              return false; // This is a valid calculation
-            }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "generateChart",
+          description: "Generate a chart for the user's financial data.",
+          parameters: {
+            type: "object",
+            properties: {
+              chartType: { type: "string", description: "Type of chart (e.g., 'spending_over_time', 'category_breakdown')" },
+              userId: { type: "string", description: "The user's ID" },
+              from: { type: "string", description: "Start date (YYYY-MM-DD)" },
+              to: { type: "string", description: "End date (YYYY-MM-DD)" }
+            },
+            required: ["chartType", "userId"]
           }
-          
-          // Check if it's a difference between values
-          for (let i = 0; i < sourceValues.length; i++) {
-            for (let j = 0; j < sourceValues.length; j++) {
-              if (i !== j && Math.abs(Math.abs(sourceValues[i] - sourceValues[j]) - responseVal) < tolerance) {
-                return false; // This is a valid difference
-              }
-            }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "getSpendingSummary",
+          description: "Get a summary of the user's spending for a given period.",
+          parameters: {
+            type: "object",
+            properties: {
+              userId: { type: "string", description: "The user's ID" },
+              from: { type: "string", description: "Start date (YYYY-MM-DD)" },
+              to: { type: "string", description: "End date (YYYY-MM-DD)" }
+            },
+            required: ["userId"]
           }
-          
-          // Check if it's a percentage or simple multiple (within reason)
-          for (let sourceVal of sourceValues) {
-            const ratio = responseVal / sourceVal;
-            if (ratio > 0 && ratio <= 2.0 && Math.abs(ratio * sourceVal - responseVal) < tolerance) {
-              return false; // This could be a percentage or simple calculation
-            }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "getTransactions",
+          description: "Get a list of transactions for the user, optionally filtered by date or category.",
+          parameters: {
+            type: "object",
+            properties: {
+              userId: { type: "string", description: "The user's ID" },
+              from: { type: "string", description: "Start date (YYYY-MM-DD)" },
+              to: { type: "string", description: "End date (YYYY-MM-DD)" },
+              category: { type: "string", description: "Transaction category (optional)" }
+            },
+            required: ["userId"]
           }
-          
-          return true; // Cannot derive this number from source data
-        });
-        
-        if (hasUnknownNumbers) {
-          console.log('🚨 WARNING: AI may be hallucinating financial data!');
-          botMessage = "I apologize, but I can only discuss the specific financial information from your connected bank account. Let me provide accurate information based on your actual account data. " + 
-                     "Please ask me about your account balances, recent transactions, or spending patterns, and I'll give you information based solely on your real banking data.";
-        } else {
-          console.log('✅ VALIDATION: AI response uses only provided data or valid calculations');
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "setBudget",
+          description: "Set a budget for a specific category for the user.",
+          parameters: {
+            type: "object",
+            properties: {
+              userId: { type: "string", description: "The user's ID" },
+              category: { type: "string", description: "Budget category (e.g., 'foundations', 'delights')" },
+              budgetAmount: { type: "number", description: "Budget amount in dollars" }
+            },
+            required: ["userId", "category", "budgetAmount"]
+          }
         }
       }
-    }
+      // Add more tools as needed
+    ];
 
-    // Process chart requests in the AI response
-    let charts = [];
-    if (accessToken && financialContext) {
-      const chartRequestRegex = /\[CHART_REQUEST:({[^}]+})\]/g;
-      let match;
-      
-      while ((match = chartRequestRegex.exec(botMessage)) !== null) {
-        try {
-          const chartRequest = JSON.parse(match[1]);
-          console.log('📊 AI requested chart:', chartRequest);
-          
-          const financialData = await getFinancialSummary(accessToken);
-          const chartData = generateChart(financialData, chartRequest);
-          
-          if (chartData) {
-            charts.push(chartData);
-            console.log('✅ Generated chart:', chartData.id);
-          }
-        } catch (error) {
-          console.error('❌ Error processing chart request:', error);
-        }
+    // 2. Prepare messages
+    const messages = [];
+    if (conversationHistory && conversationHistory.length > 0) {
+      for (const msg of conversationHistory) {
+        messages.push({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text });
       }
-      
-      // Remove chart request markers from the message
-      botMessage = botMessage.replace(chartRequestRegex, '').trim();
     }
+    messages.push({ role: "user", content: message });
 
-    res.json({
-      message: botMessage,
-      charts: charts,
+    // 3. Call Ollama with tools
+    response = await aiService.generateContent(
+      { messages },            // prompt
+      { tools }                // options
+    );
+    // If using OpenAI-compatible API, adapt as needed
+    if (response && response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.tool_calls) {
+      // 4. If tool call is requested, execute it
+      for (const toolCall of response.choices[0].message.tool_calls) {
+        if (toolCall.function.name === "getUncategorizedTransactions") {
+          const uncategorizedTxs = await convexService.getUncategorizedTransactions(toolCall.function.arguments.userId || (USE_TEST_USER ? TEST_USER_ID : 'default_user'));
+          messages.push({
+            role: "tool",
+            name: "getUncategorizedTransactions",
+            content: JSON.stringify(uncategorizedTxs)
+          });
+        } else if (toolCall.function.name === "generateChart") {
+          const { chartType, userId, from, to } = toolCall.function.arguments;
+          const chartResult = await generateChart({ chartType, userId, from, to });
+          messages.push({
+            role: "tool",
+            name: "generateChart",
+            content: JSON.stringify({ chartUrl: chartResult })
+          });
+        } else if (toolCall.function.name === "getSpendingSummary") {
+          const { userId, from, to } = toolCall.function.arguments;
+          const summary = await convexService.getSpendingSummary(userId, from, to);
+          messages.push({
+            role: "tool",
+            name: "getSpendingSummary",
+            content: JSON.stringify(summary)
+          });
+        } else if (toolCall.function.name === "getTransactions") {
+          const args = toolCall.function.arguments;
+          let userIdFromTool = args.userId;
+          let finalUserId;
+
+          if (typeof userIdFromTool === 'string' && userIdFromTool.trim() !== '') {
+            finalUserId = userIdFromTool;
+          } else {
+            if (USE_TEST_USER) {
+              finalUserId = TEST_USER_ID;
+              console.log(`[Chat Tool getTransactions] userIdFromTool invalid ('${userIdFromTool}'), using TEST_USER_ID.`);
+            } else {
+              console.error(`[Chat Tool getTransactions] Invalid userId ('${userIdFromTool}') provided by tool and not using TEST_USER. Setting to undefined.`);
+              finalUserId = undefined; // This will cause Convex validation to fail clearly if userId is required.
+            }
+          }
+          
+          const { from, to, category } = args;
+          console.log(`[Chat Tool getTransactions] Calling convexService.listTransactions with userId: "${finalUserId}", budgetId: "${category}", from: "${from}", to: "${to}"`);
+          const transactions = await convexService.listTransactions({ userId: finalUserId, from, to, budgetId: category });
+          messages.push({
+            role: "tool",
+            name: "getTransactions",
+            content: JSON.stringify(transactions)
+          });
+        } else if (toolCall.function.name === "setBudget") {
+          const { userId, category, budgetAmount } = toolCall.function.arguments;
+          const result = await convexService.setBudget(userId, category, budgetAmount);
+          messages.push({
+            role: "tool",
+            name: "setBudget",
+            content: JSON.stringify(result)
+          });
+        }
+        // Add more tool handlers as needed
+      }
+      // 5. Call Ollama again with tool results for final answer
+      response = await aiService.generateContent(
+        { messages },            // prompt
+        { tools }                // options
+      );
+      // After getting the response from Ollama
+      console.log('Ollama raw response:', JSON.stringify(response, null, 2));
+      let answer = '';
+      if (
+        response &&
+        Array.isArray(response.choices) &&
+        response.choices.length > 0 &&
+        response.choices[0] &&
+        response.choices[0].message &&
+        typeof response.choices[0].message.content === 'string'
+      ) {
+        answer = response.choices[0].message.content;
+      }
+      if (!answer) {
+        answer = "<p><em>No answer generated. Try rephrasing your question.</em></p>";
+      }
+      return res.json({
+        message: convertToHTML(answer),
+        timestamp: new Date().toISOString(),
+        hasFinancialData: !!accessToken
+      });
+    }
+    // 6. If no tool call, just return the model's answer
+    // After getting the response from Ollama
+    console.log('Ollama raw response:', JSON.stringify(response, null, 2));
+    let answer = '';
+    if (
+      response &&
+      Array.isArray(response.choices) &&
+      response.choices.length > 0 &&
+      response.choices[0] &&
+      response.choices[0].message &&
+      typeof response.choices[0].message.content === 'string'
+    ) {
+      answer = response.choices[0].message.content;
+    }
+    if (!answer) {
+      answer = "<p><em>No answer generated. Try rephrasing your question.</em></p>";
+    }
+    return res.json({
+      message: convertToHTML(answer),
       timestamp: new Date().toISOString(),
       hasFinancialData: !!accessToken
     });
-
   } catch (error) {
-    console.error('Error generating response:', error);
-    res.status(500).json({ 
-      error: 'Failed to generate response',
-      details: error.message 
+    console.error('🔧 DEBUG: Chat Error:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error.message
     });
   }
 });
@@ -729,12 +968,10 @@ ${financialContext}`;
     console.log('📝 Voice prompt length:', prompt.length);
 
     // Get AI response
-    const response = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash-preview-05-20',
-      contents: prompt,
-    });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    const response = await model.generateContent(prompt);
 
-    let botMessage = response.text;
+    let botMessage = response.response.text();
     
     console.log('🤖 AI Voice Response:', botMessage);
 
@@ -991,7 +1228,7 @@ app.post('/api/gemini-live/send-audio', upload.single('audio'), async (req, res)
       const response = await responsePromise;
 
       // Handle function calls if present
-      if (response.functionCalls && response.functionCalls.length > 0) {
+      if (response && response.functionCalls && response.functionCalls.length > 0) {
         for (const functionCall of response.functionCalls) {
           const functionResult = await handleGeminiFunctionCall(functionCall, req);
           // Send function result back to Gemini
@@ -1054,7 +1291,7 @@ app.post('/api/gemini-live/send-text', async (req, res) => {
     const response = await session.service.sendText(message);
 
     // Handle function calls if present
-    if (response.functionCalls && response.functionCalls.length > 0) {
+    if (response && response.functionCalls && response.functionCalls.length > 0) {
       for (const functionCall of response.functionCalls) {
         const functionResult = await handleGeminiFunctionCall(functionCall, req);
         // Send function result back to Gemini
@@ -1172,6 +1409,7 @@ async function handleGeminiFunctionCall(functionCall, req) {
           products: ['transactions'],
           country_codes: ['US'],
           language: 'en',
+          webhook: 'https://webhook.site/unique-url', // Webhook endpoint for transaction updates
         };
         const response = await plaidClient.linkTokenCreate(request);
         return { link_token: response.data.link_token };
@@ -1260,11 +1498,32 @@ app.post('/api/plaid/exchange-public-token', async (req, res) => {
     const accessToken = response.data.access_token;
     const itemId = response.data.item_id;
 
+    // Store access token for webhook processing
+    console.log('💾 Storing access token for webhook-based transaction sync...');
+    
+    try {
+      const userId = USE_TEST_USER ? TEST_USER_ID : 'default_user';
+      
+      // Update account balance in Convex with the access token
+      const { getAccountBalances } = require('./plaidClient');
+      const balances = await getAccountBalances(accessToken);
+      const totalBalance = balances.reduce((sum, account) => sum + (account.balances.current || 0), 0);
+      
+      await convexService.updateAccountBalance(userId, totalBalance, accessToken);
+      console.log(`✅ Updated account balance: $${totalBalance.toFixed(2)} and stored access token`);
+      console.log(`⏳ Waiting for Plaid webhook to notify when transactions are ready...`);
+      
+    } catch (syncError) {
+      console.error('❌ Error during initial setup:', syncError);
+      // Don't fail the token exchange if this fails - just log the error
+    }
+
     // In production, store these tokens securely in your database
     res.json({ 
       access_token: accessToken,
       item_id: itemId,
-      success: true
+      success: true,
+      transactions_synced: true
     });
   } catch (error) {
     console.error('Error exchanging public token:', error);
@@ -1293,6 +1552,112 @@ app.post('/api/plaid/financial-summary', async (req, res) => {
     });
   }
 });
+
+// Plaid webhook endpoint
+app.post('/api/plaid/webhook', async (req, res) => {
+  try {
+    const { webhook_type, webhook_code, item_id, new_transactions, removed_transactions } = req.body;
+    
+    console.log(`🪝 Plaid webhook received: ${webhook_type}.${webhook_code} for item ${item_id}`);
+    
+    // Respond immediately to Plaid (must be within 10 seconds)
+    res.status(200).json({ acknowledged: true });
+    
+    // Handle webhook asynchronously 
+    if (webhook_type === 'TRANSACTIONS') {
+      if (webhook_code === 'SYNC_UPDATES_AVAILABLE') {
+        console.log('📊 Transaction updates available, syncing to Convex...');
+        await handleTransactionSync(item_id);
+      } else if (webhook_code === 'INITIAL_UPDATE') {
+        console.log('🆕 Initial transaction data ready');
+        await handleTransactionSync(item_id);
+      } else if (webhook_code === 'HISTORICAL_UPDATE') {
+        console.log('📚 Historical transaction data ready');
+        await handleTransactionSync(item_id);
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ Webhook error:', error);
+    // Still return 200 to Plaid to prevent retries
+    res.status(200).json({ acknowledged: false, error: error.message });
+  }
+});
+
+// Handle transaction sync using modern /transactions/sync API
+async function handleTransactionSync(itemId) {
+  try {
+    console.log(`🔄 Starting transaction sync for item ${itemId}`);
+    
+    // TODO: Get access token from database using itemId
+    // For now, we'll need to modify this to store/retrieve tokens properly
+    const userId = USE_TEST_USER ? TEST_USER_ID : 'default_user';
+    
+    // Get the access token from Convex (stored in updateAccountBalance)
+    const userAccount = await convexService.getUserAccount(userId);
+    if (!userAccount?.plaidAccessToken) {
+      console.error('❌ No access token found for transaction sync');
+      return;
+    }
+    
+    const accessToken = userAccount.plaidAccessToken;
+    
+    // Use modern /transactions/sync endpoint
+    let cursor = ''; // Start from beginning for full sync
+    let hasMore = true;
+    let totalSynced = 0;
+    
+    while (hasMore) {
+      console.log(`📥 Fetching transactions with cursor: ${cursor || 'initial'}`);
+      
+      const syncResponse = await plaidClient.transactionsSync({
+        access_token: accessToken,
+        cursor: cursor,
+        count: 100 // Max transactions per request
+      });
+      
+      const { added, modified, removed, has_more, next_cursor } = syncResponse.data;
+      
+      console.log(`📊 Sync batch: +${added.length} added, ~${modified.length} modified, -${removed.length} removed`);
+      
+      // Process added transactions
+      for (const transaction of added) {
+        try {
+          const transactionData = {
+            userId,
+            txId: transaction.transaction_id,
+            plaidTransactionId: transaction.transaction_id,
+            accountId: transaction.account_id,
+            amount: transaction.amount,
+            date: Date.parse(transaction.date),
+            merchantName: transaction.merchant_name || transaction.name,
+            description: transaction.name,
+            plaidCategory: transaction.category,
+            plaidSubcategory: transaction.personal_finance_category?.primary || null,
+            currencyCode: transaction.iso_currency_code || 'USD',
+            createdAt: Date.now(),
+            isApproved: false
+          };
+          
+          await convexService.storeTransaction(transactionData);
+          totalSynced++;
+        } catch (storeError) {
+          console.error(`❌ Error storing transaction ${transaction.transaction_id}:`, storeError.message);
+        }
+      }
+      
+      // TODO: Handle modified and removed transactions
+      
+      cursor = next_cursor;
+      hasMore = has_more;
+    }
+    
+    console.log(`✅ Transaction sync completed: ${totalSynced} transactions synced to Convex`);
+    
+  } catch (error) {
+    console.error('❌ Transaction sync failed:', error);
+  }
+}
 
 // Get transaction category breakdown
 app.get('/api/categories/:accessToken', async (req, res) => {
@@ -1328,8 +1693,273 @@ app.get('/api/health', (req, res) => {
     plaidConfigured: !!(process.env.PLAID_CLIENT_ID && process.env.PLAID_SECRET),
     voiceChatEnabled: !!process.env.CARTESIA_API_KEY,
     dailyConfigured: !!(process.env.DAILY_API_KEY && process.env.DAILY_API_KEY !== 'your-daily-api-key-here'),
-    sttEnabled: !!process.env.OPENAI_API_KEY
+    sttEnabled: !!process.env.OPENAI_API_KEY,
+    convexConfigured: !!process.env.CONVEX_URL
   });
+});
+
+// ===== CONVEX BUDGET API ROUTES =====
+
+// Get user budgets
+app.post('/api/convex/budgets', async (req, res) => {
+  try {
+    console.log('🔧 DEBUG: /api/convex/budgets called with:', req.body);
+    const { function: functionName, args } = req.body || {};
+    
+    let result;
+    switch (functionName) {
+      case 'getUserBudgets':
+        result = await convexService.getUserBudgets(args.userId);
+        break;
+      case 'getUserAccount':
+        result = await convexService.getUserAccount(args.userId);
+        break;
+      case 'getSpendingSummary':
+        result = await convexService.getSpendingSummary(args.userId);
+        break;
+      default:
+        return res.status(400).json({ error: 'Unknown function' });
+    }
+    
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Convex query error:', error);
+    res.status(500).json({ 
+      error: 'Failed to execute Convex query',
+      details: error.message 
+    });
+  }
+});
+
+// Set budget (called by AI)
+app.post('/api/budget/set', async (req, res) => {
+  try {
+    const { userId = USE_TEST_USER ? TEST_USER_ID : null, category, budgetAmount, aiAnalysis } = req.body;
+    
+    if (!category || !budgetAmount) {
+      return res.status(400).json({ error: 'Category and budget amount are required' });
+    }
+
+    const validCategories = ['foundations', 'delights', 'nest_egg', 'wild_cards'];
+    if (!validCategories.includes(category)) {
+      return res.status(400).json({ error: 'Invalid category' });
+    }
+
+    const result = await convexService.setBudget(userId, category, budgetAmount, aiAnalysis);
+    
+    // Recalculate feels like amount after setting budget
+    await convexService.calculateFeelsLike(userId, category);
+    
+    res.json({ 
+      success: true, 
+      budgetId: result,
+      message: `Budget set for ${category}: $${budgetAmount}`
+    });
+  } catch (error) {
+    console.error('Error setting budget:', error);
+    res.status(500).json({ 
+      error: 'Failed to set budget',
+      details: error.message 
+    });
+  }
+});
+
+// ===== CONVERSATIONAL BUDGETING API ROUTES =====
+
+// Sync Plaid transactions
+app.post('/api/syncPlaid', async (req, res) => {
+  try {
+    const { userId = USE_TEST_USER ? TEST_USER_ID : null } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const result = await convexService.syncPlaid(userId);
+    
+    res.json({ 
+      success: true, 
+      newCount: result.newCount || 0,
+      message: `Synced ${result.newCount || 0} new transactions`
+    });
+  } catch (error) {
+    console.error('Error syncing Plaid:', error);
+    res.status(500).json({ 
+      error: 'Failed to sync Plaid transactions',
+      details: error.message 
+    });
+  }
+});
+
+// AI suggest category for transaction
+app.post('/api/transaction/suggest', async (req, res) => {
+  try {
+    const { txId, suggestion, confidence } = req.body;
+    
+    if (!txId || !suggestion || confidence === undefined) {
+      return res.status(400).json({ error: 'Transaction ID, suggestion, and confidence are required' });
+    }
+
+    const result = await convexService.suggestCategory(txId, suggestion, confidence);
+    
+    res.json({ 
+      success: true, 
+      result,
+      message: `Suggested ${suggestion} for transaction with ${confidence} confidence`
+    });
+  } catch (error) {
+    console.error('Error suggesting category:', error);
+    res.status(500).json({ 
+      error: 'Failed to suggest category',
+      details: error.message 
+    });
+  }
+});
+
+// Approve transaction category
+app.post('/api/transaction/approve', async (req, res) => {
+  try {
+    const { txId, finalCategory } = req.body;
+    
+    if (!txId || !finalCategory) {
+      return res.status(400).json({ error: 'Transaction ID and final category are required' });
+    }
+
+    const validCategories = ['foundations', 'delights', 'nest_egg', 'wild_cards'];
+    if (!validCategories.includes(finalCategory)) {
+      return res.status(400).json({ error: 'Invalid category' });
+    }
+
+    const result = await convexService.approveCategory(txId, finalCategory);
+    
+    res.json({ 
+      success: true, 
+      result,
+      message: `Approved ${finalCategory} for transaction`
+    });
+  } catch (error) {
+    console.error('Error approving category:', error);
+    res.status(500).json({ 
+      error: 'Failed to approve category',
+      details: error.message 
+    });
+  }
+});
+
+// List transactions with filtering
+app.post('/api/transactions/list', async (req, res) => {
+  try {
+    let userIdFromRequest = req.body.userId;
+    let finalUserId;
+
+    if (typeof userIdFromRequest === 'string' && userIdFromRequest.trim() !== '') {
+      finalUserId = userIdFromRequest;
+    } else {
+      if (USE_TEST_USER) {
+        finalUserId = TEST_USER_ID;
+        console.log(`[/api/transactions/list] userIdFromRequest invalid ('${userIdFromRequest}'), using TEST_USER_ID.`);
+      } else {
+        console.error(`[/api/transactions/list] Invalid userId ('${userIdFromRequest}') in request and not using TEST_USER.`);
+        return res.status(400).json({ error: 'Valid User ID is required as a non-empty string' });
+      }
+    }
+    
+    const { budgetId, from, to } = req.body;
+    console.log(`[/api/transactions/list] Calling convexService.listTransactions with userId: "${finalUserId}", budgetId: "${budgetId}", from: "${from}", to: "${to}"`);
+    const transactions = await convexService.listTransactions({ userId: finalUserId, budgetId, from, to });
+    
+    res.json({ 
+      success: true, 
+      transactions,
+      count: transactions.length
+    });
+  } catch (error) {
+    console.error('Error listing transactions:', error);
+    res.status(500).json({ 
+      error: 'Failed to list transactions',
+      details: error.message 
+    });
+  }
+});
+
+// Get uncategorized transactions for review
+app.post('/api/transactions/uncategorized', async (req, res) => {
+  try {
+    const { userId = USE_TEST_USER ? TEST_USER_ID : null } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const transactions = await convexService.getUncategorizedTransactions(userId);
+    
+    res.json({ 
+      success: true, 
+      transactions,
+      count: transactions.length
+    });
+  } catch (error) {
+    console.error('Error fetching uncategorized transactions:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch uncategorized transactions',
+      details: error.message 
+    });
+  }
+});
+
+// Test endpoint for function calling
+app.post('/api/test-functions', async (req, res) => {
+  try {
+    console.log('🧪 Testing function calling...');
+    
+    const tools = [{
+      functionDeclarations: [{
+        name: "suggestCategory",
+        description: "Suggest a budget category for a transaction",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            txId: { type: Type.STRING, description: "Transaction ID" },
+            suggestion: { 
+              type: Type.STRING, 
+              enum: ["foundations", "delights", "nest_egg", "wild_cards"],
+              description: "Suggested category" 
+            },
+            confidence: { type: Type.NUMBER, description: "Confidence 0.0-1.0" }
+          },
+          required: ["txId", "suggestion", "confidence"]
+        }
+      }]
+    }];
+
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-2.0-flash-exp',
+      tools: tools,
+      toolConfig: { functionCallingConfig: { mode: 'ANY' } }
+    });
+
+    const prompt = `Categorize this transaction: tx_123 - Starbucks $4.50. Use the suggestCategory function.`;
+    const response = await model.generateContent(prompt);
+
+    console.log('🧪 Test response keys:', Object.keys(response));
+    const candidate = response.candidates?.[0];
+    
+    let functionCalls = [];
+    if (candidate?.content?.parts) {
+      functionCalls = candidate.content.parts.filter(part => part.functionCall);
+    }
+
+    res.json({
+      success: true,
+      functionCallsFound: functionCalls.length,
+      functionCalls: functionCalls,
+      candidateText: candidate?.content?.parts?.[0]?.text || 'No text'
+    });
+
+  } catch (error) {
+    console.error('🧪 Test error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Daily.co API endpoints
@@ -1994,18 +2624,7 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/api/health`);
-  console.log('Environment variables check:');
-  console.log('- GOOGLE_AI_API_KEY:', process.env.GOOGLE_AI_API_KEY ? 'Set' : 'Not set');
-  console.log('- PLAID_CLIENT_ID:', process.env.PLAID_CLIENT_ID ? 'Set' : 'Not set');
-  console.log('- PLAID_SECRET:', process.env.PLAID_SECRET ? 'Set' : 'Not set');
-  console.log('- PLAID_ENV:', process.env.PLAID_ENV || 'Not set (defaulting to sandbox)');
-  console.log('- CARTESIA_API_KEY:', process.env.CARTESIA_API_KEY ? 'Set (Voice chat enabled)' : 'Not set (Voice chat disabled)');
-  console.log('- DAILY_API_KEY:', process.env.DAILY_API_KEY ? 'Set (Daily.co enabled)' : 'Not set (Daily.co fallback mode)');
-  console.log('- OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'Set (Whisper STT enabled)' : 'Not set (STT disabled)');
-});
+// Removed duplicate server.listen() call - only using the one at the bottom
 
 // Real-time voice chat endpoints
 
@@ -2015,8 +2634,8 @@ app.post('/api/voice/realtime/start', async (req, res) => {
     const { userId, accessToken } = req.body;
     const sessionId = `voice_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
-    // Create new voice session
-    const voiceSession = new RealTimeVoiceSession(sessionId, userId);
+    // Create new voice session with access token for financial context
+    const voiceSession = new RealTimeVoiceSession(sessionId, userId, accessToken);
     const sessionData = await voiceSession.initialize();
     
     // Store session
@@ -2160,3 +2779,90 @@ if (process.env.VERCEL) {
     console.log('- OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'Set (Whisper STT enabled)' : 'Not set (Whisper STT disabled)');
   });
 }
+
+// Spending Money endpoint
+app.post('/api/spending-money', async (req, res) => {
+  try {
+    const { userId, plaidAccessToken } = req.body;
+    
+    if (!plaidAccessToken) {
+      return res.status(400).json({ error: 'Plaid access token is required' });
+    }
+
+    const balances = await getAccountBalances(plaidAccessToken);
+    
+    // Filter for checking accounts only
+    const relevantAccounts = balances.filter(acc => 
+      acc.type === 'depository' && acc.subtype === 'checking'
+    );
+
+    const availableBalance = relevantAccounts.reduce(
+      (sum, acc) => sum + (acc.balances.available || 0),
+      0
+    );
+
+    const recurringTxs = await getRecurringTransactions(userId);
+    
+    const recurringDeductions = recurringTxs.map(tx => ({
+      name: tx.merchantName,
+      amount: tx.amount,
+      nextDueDate: tx.nextDueDate,
+      isFixed: tx.isFixed
+    }));
+
+    const totalRecurring = recurringDeductions.reduce(
+      (sum, deduction) => sum + deduction.amount,
+      0
+    );
+
+    const spendingMoney = Math.max(0, availableBalance - totalRecurring);
+
+    // Prepare the list of accounts that contributed to the balance
+    const contributingAccounts = relevantAccounts.map(acc => ({
+      name: acc.name,
+      balance: acc.balances.available || 0
+    }));
+
+    res.json({
+      availableBalance,
+      recurringDeductions,
+      spendingMoney,
+      contributingAccounts, // Add this to the response
+      lastUpdated: Date.now()
+    });
+  } catch (error) {
+    console.error('Error in spending money endpoint:', error);
+    res.status(500).json({ error: 'Failed to calculate spending money' });
+  }
+});
+
+// New endpoint to get all transactions for a user
+app.post('/api/transactions/list-all', async (req, res) => {
+  try {
+    let userIdFromRequest = req.body.userId;
+    let finalUserId;
+
+    if (typeof userIdFromRequest === 'string' && userIdFromRequest.trim() !== '') {
+      finalUserId = userIdFromRequest;
+    } else {
+      if (USE_TEST_USER) {
+        finalUserId = TEST_USER_ID;
+        console.log(`[/api/transactions/list-all] userIdFromRequest invalid ('${userIdFromRequest}'), using TEST_USER_ID.`);
+      } else {
+        console.error(`[/api/transactions/list-all] Invalid userId ('${userIdFromRequest}') in request and not using TEST_USER.`);
+        return res.status(400).json({ error: 'Valid User ID is required as a non-empty string' });
+      }
+    }
+
+    console.log(`[/api/transactions/list-all] Calling convexService.listTransactions with userId: "${finalUserId}"`);
+    const transactions = await convexService.listTransactions({ userId: finalUserId });
+
+    res.json({ success: true, transactions });
+  } catch (error) {
+    console.error('Error fetching all transactions:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch transactions',
+      details: error.message 
+    });
+  }
+});

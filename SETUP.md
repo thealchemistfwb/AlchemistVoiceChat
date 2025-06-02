@@ -1,10 +1,10 @@
-# Financial Insights Chatbot with Plaid & Google Gemini 2.5 Pro
+# Financial Insights Chatbot with Plaid & Qwen3
 
-A modern React chatbot application that provides financial insights by connecting to your bank accounts via Plaid API and analyzing your spending patterns with Google Gemini 2.5 Pro AI.
+A modern React chatbot application that provides financial insights by connecting to your bank accounts via Plaid API and analyzing your spending patterns with Qwen3 AI.
 
 ## Features
 
-- Real-time chat interface with Google Gemini 2.5 Pro
+- Real-time chat interface with Qwen3
 - Plaid API integration for secure bank account access
 - Automatic analysis of spending patterns and transactions
 - Financial insights without giving financial advice

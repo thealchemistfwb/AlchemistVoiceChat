@@ -133,6 +133,71 @@ class ConvexService {
       throw error;
     }
   }
+
+  // Conversational Budgeting Functions
+  async syncPlaid(userId) {
+    try {
+      return await this.convex.mutation("transactions:syncPlaid", { userId });
+    } catch (error) {
+      console.error('Error syncing Plaid transactions:', error);
+      throw error;
+    }
+  }
+
+  async suggestCategory(txId, suggestion, confidence) {
+    try {
+      return await this.convex.mutation("transactions:suggestCategory", {
+        txId,
+        suggestion,
+        confidence
+      });
+    } catch (error) {
+      console.error('Error suggesting category:', error);
+      throw error;
+    }
+  }
+
+  async approveCategory(txId, finalCategory) {
+    try {
+      return await this.convex.mutation("transactions:approveCategory", {
+        txId,
+        finalCategory
+      });
+    } catch (error) {
+      console.error('Error approving category:', error);
+      throw error;
+    }
+  }
+
+  async listTransactions(params) {
+    try {
+      // params should be an object like { userId: "string", budgetId: "string|null", from: "string|null", to: "string|null" }
+      const args = { 
+        userId: params.userId,
+        budgetId: params.budgetId,
+        from: params.from,
+        to: params.to
+      };
+      
+      // Ensure only defined values are passed to the Convex query
+      Object.keys(args).forEach(key => args[key] === undefined && delete args[key]);
+
+      console.log('[convexService.listTransactions] Calling Convex query with args:', args);
+      return await this.convex.query("transactions:listTransactions", args);
+    } catch (error) {
+      console.error('Error listing transactions:', error);
+      throw error;
+    }
+  }
+
+  async getUncategorizedTransactions(userId) {
+    try {
+      return await this.convex.query("transactions:getUncategorizedTransactions", { userId });
+    } catch (error) {
+      console.error('Error fetching uncategorized transactions:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new ConvexService();

@@ -1,7 +1,7 @@
 {
   "name": "chatbot-backend",
   "version": "1.0.0",
-  "description": "Backend server for chatbot with Google Gemini 2.5 Pro integration",
+  "description": "Backend server for chatbot with Qwen3 integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -1,0 +1,119 @@
+.spending-money-widget {
+  padding: 24px;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  border-radius: 16px;
+  color: white;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+.spending-money-widget.loading {
+  text-align: center;
+  padding: 40px;
+}
+
+.spending-money-widget .loading-spinner {
+  font-size: 48px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.spending-money-widget .error {
+  text-align: center;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  margin: 10px 0;
+}
+
+.spending-money-widget .error h6 {
+  margin: 0;
+  color: #ef4444;
+}
+
+.spending-money-widget .no-data {
+  text-align: center;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  margin: 10px 0;
+}
+
+.spending-money-widget .no-data h6 {
+  margin: 0;
+  opacity: 0.8;
+}
+
+.spending-money-widget .amount {
+  font-size: 2.5em;
+  font-weight: 700;
+  margin: 16px 0;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.spending-money-widget .available-balance {
+  font-size: 0.9em;
+  opacity: 0.9;
+  margin-bottom: 16px;
+}
+
+.spending-money-widget .deductions {
+  margin-top: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.spending-money-widget .deductions h6 {
+  margin: 0 0 12px 0;
+  font-size: 1em;
+  opacity: 0.9;
+}
+
+.spending-money-widget .deduction-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.spending-money-widget .deduction-item:last-child {
+  border-bottom: none;
+}
+
+.spending-money-widget .deduction-name {
+  font-size: 0.9em;
+  opacity: 0.9;
+}
+
+.spending-money-widget .deduction-amount {
+  font-size: 0.9em;
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.spending-money-widget .last-updated {
+  font-size: 0.8em;
+  opacity: 0.7;
+  text-align: right;
+  margin-top: 16px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .spending-money-widget {
+    padding: 16px;
+  }
+  
+  .spending-money-widget .amount {
+    font-size: 2em;
+  }
+  
+  .spending-money-widget .deductions {
+    padding: 12px;
+  }
+} 

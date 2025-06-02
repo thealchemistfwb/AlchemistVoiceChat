@@ -15,11 +15,13 @@ const HtmlRenderer = ({ content, sender }) => {
       'p', 'div', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
       'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
       'strong', 'em', 'b', 'i', 'br', 'hr', 'blockquote',
-      'code', 'pre', 'a', 'img'
+      'code', 'pre', 'a', 'img',
+      'button'
     ],
     ALLOWED_ATTR: [
       'class', 'id', 'style', 'href', 'src', 'alt', 'title',
-      'target', 'rel'
+      'target', 'rel',
+      'aria-expanded'
     ],
     ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i
   });

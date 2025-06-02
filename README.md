@@ -8,6 +8,8 @@ A sophisticated AI-powered voice chat application featuring real-time speech-to-
 - **🎙️ Real-time Voice Chat** - Powered by Google Gemini Live API for native speech-to-speech communication
 - **💰 Financial Assistant** - Integration with Plaid for banking data analysis and insights
 - **📊 Interactive Charts** - Visual spending analysis and financial summaries
+- **🏠 AI Budget Management** - Smart budgeting with 4 categories: Foundations, Delights, Nest Egg, Wild Cards
+- **🧠 "Feels Like" Spending** - Predictive spending analysis based on AI pattern recognition
 - **🗣️ High-Quality Voice Synthesis** - Multiple voice options via Cartesia API
 - **🎥 Video Chat Support** - Daily.co integration for enhanced communication
 
@@ -110,6 +112,7 @@ AlchemistVoiceChat/
 - **Backend:** Express.js, WebSocket, Multer
 - **AI/Voice:** Google Gemini Live API, Cartesia, OpenAI Whisper
 - **Financial:** Plaid API for banking integration
+- **Database:** Convex for real-time budget data
 - **Deployment:** Vercel serverless functions
 - **Real-time:** WebRTC, WebSocket connections
 
